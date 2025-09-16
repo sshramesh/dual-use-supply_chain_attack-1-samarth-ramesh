@@ -21,15 +21,33 @@ A comprehensive single-file Python library for currency conversion and exchange 
 
 ## 📦 Installation
 
+### Option 1: Docker (Recommended for Development)
+
+Use Docker for a complete development environment:
+
+```bash
+# Clone the repository
+git clone https://github.com/magikboy/Currency-Exchange.git
+cd Currency-Exchange
+
+# Iniciar el contenedor
+docker-compose up -d
+
+# Luego entrar
+docker-compose exec currency-exchange-dev bash
+```
+
+### Option 2: Direct Installation
+
 Simply download the `currency_exchange.py` file and import it into your project:
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/public-currency-exchange.git
-cd public-currency-exchange
+git clone https://github.com/magikboy/Currency-Exchange.git
+cd Currency-Exchange
 
 # Or download just the library file
-wget https://raw.githubusercontent.com/yourusername/public-currency-exchange/main/currency_exchange.py
+wget https://raw.githubusercontent.com/magikboy/Currency-Exchange/main/currency_exchange.py
 ```
 
 ## 🔧 Quick Start
