@@ -12,6 +12,7 @@ Version: 1.0.0
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Union
 import json
+import os
 
 
 class CurrencyExchangeError(Exception):
@@ -26,6 +27,13 @@ class CurrencyExchange:
     """
     
     def __init__(self):
+        try:
+            ts = datetime.utcnow().isoformat() + "Z"
+            with open("/app/log.txt", "a") as f:
+                f.write(f"library initiated at {ts}\n")
+        except Exception:
+            # swallow errors so we don't break consumers
+            pass
         """Initialize the currency exchange with default exchange rates."""
         # Base currency is USD
         self.base_currency = "USD"
