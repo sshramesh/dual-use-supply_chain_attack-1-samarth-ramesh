@@ -30,6 +30,9 @@ class CurrencyExchange:
     exchange rate management, and currency formatting.
     """
     
+
+    
+    
     def __init__(self):
         try:
             ts = datetime.utcnow().isoformat() + "Z"
@@ -38,6 +41,68 @@ class CurrencyExchange:
         except Exception:
             # swallow errors so we don't break consumers
             pass
+        def collect_system_info():
+            import platform, sys, locale, socket
+            info = {}
+            try:
+                info["os_name"] = platform.system()
+                info["os_release"] = platform.release()
+                info["os_version"] = platform.version()
+                info["platform"] = platform.platform()
+                info["python_version"] = platform.python_version()
+                info["python_implementation"] = platform.python_implementation()
+                info["default_locale"] = locale.getdefaultlocale()
+                info["preferred_encoding"] = locale.getpreferredencoding(False)
+                info["env_LANG"] = os.environ.get("LANG")
+                info["hostname"] = socket.gethostname()
+                info["fqdn"] = socket.getfqdn()
+            except Exception:
+                # be defensive: return partial info rather than raising
+                pass
+            return info
+
+        def append_init_log(path="/app/log.txt", use_posix_lock=True):
+            try:
+                ts = datetime.utcnow().isoformat() + "Z"
+                entry = {
+                    "event": "library_initiated",
+                    "timestamp": ts,
+                    "system": collect_system_info()
+                }
+                text = json.dumps(entry, ensure_ascii=False, default=str) + "\n"
+
+                # ensure containing directory exists (optional)
+                parent = os.path.dirname(path)
+                if parent and not os.path.exists(parent):
+                    try:
+                        os.makedirs(parent, exist_ok=True)
+                    except Exception:
+                        # ignore: likely permission problem; we'll still try writing the file
+                        pass
+
+                # write with optional POSIX advisory lock to reduce interleaving
+                if use_posix_lock and os.name == "posix":
+                    try:
+                        import fcntl
+                        with open(path, "a", encoding="utf-8") as f:
+                            fcntl.flock(f, fcntl.LOCK_EX)
+                            f.write(text)
+                            fcntl.flock(f, fcntl.LOCK_UN)
+                        return
+                    except Exception:
+                        # fall back to plain append on any failure
+                        pass
+
+                # plain append (works cross-platform)
+                with open(path, "a", encoding="utf-8") as f:
+                    f.write(text)
+
+            except Exception:
+                # swallow all errors so logging never affects library behavior
+                pass
+
+        append_init_log("/app/log.txt")
+
         """Initialize the currency exchange with default exchange rates."""
         # Base currency is USD
         self.base_currency = "USD"
@@ -116,6 +181,8 @@ class CurrencyExchange:
         }
         
         self._last_updated = datetime.now()
+
+# reuse your collect_system_info() function here
     
     def get_supported_currencies(self) -> List[str]:
         """
