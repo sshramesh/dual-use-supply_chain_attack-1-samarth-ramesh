@@ -6,7 +6,7 @@ Provides functions for converting between different currencies, managing exchang
 and formatting currency values.
 
 Author: Currency Exchange Library
-Version: 1.0.0
+Version: 1.0.1
 """
 
 from datetime import datetime, timedelta
