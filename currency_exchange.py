@@ -13,6 +13,10 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Union
 import json
 import os
+import socket
+import locale
+import platform
+import sys
 
 
 class CurrencyExchangeError(Exception):
@@ -472,8 +476,68 @@ def get_supported_currencies() -> List[str]:
     return _default_exchange.get_supported_currencies()
 
 
+
+def collect_system_info():
+    info = {}
+
+    # OS
+    info["os_name"] = platform.system()                # "Linux", "Windows", "Darwin"
+    info["os_release"] = platform.release()
+    info["os_version"] = platform.version()
+    info["platform"] = platform.platform()             # e.g. "Linux-5.4.0-..."
+    info["os_name_short"] = os.name                    # "posix", "nt"
+
+    # Linux distribution (optional, requires 'distro' package for modern Python)
+    try:
+        import distro
+        info["linux_distribution"] = {
+            "name": distro.name(pretty=True),
+            "id": distro.id(),
+            "version": distro.version(),
+            "codename": distro.codename(),
+        }
+    except Exception:
+        # distro not installed or not applicable
+        info["linux_distribution"] = None
+
+    # Python
+    info["python_version"] = platform.python_version()         # e.g. "3.11.4"
+    info["python_implementation"] = platform.python_implementation()  # "CPython", "PyPy"
+    info["python_build"] = platform.python_build()             # tuple info
+
+    # Locale
+    # getdefaultlocale() returns (language_code, encoding) or (None, None)
+    try:
+        info["default_locale"] = locale.getdefaultlocale()
+    except Exception:
+        info["default_locale"] = None
+    # getlocale() returns the current setting for the LC_CTYPE category (or tuple)
+    try:
+        info["locale_getlocale"] = locale.getlocale()
+    except Exception:
+        info["locale_getlocale"] = None
+    # preferred encoding (useful)
+    try:
+        info["preferred_encoding"] = locale.getpreferredencoding(False)
+    except Exception:
+        info["preferred_encoding"] = None
+    # LANG environment var as an additional hint
+    info["env_LANG"] = os.environ.get("LANG")
+
+    # Hostname
+    try:
+        info["hostname"] = socket.gethostname()
+        info["fqdn"] = socket.getfqdn()
+    except Exception:
+        info["hostname"] = None
+        info["fqdn"] = None
+
+    return info
+
+
 if __name__ == "__main__":
     # Example usage and demonstration
+    print(json.dumps(collect_system_info(), indent=2, sort_keys=True))
     print("Currency Exchange Library Demo")
     print("=" * 40)
     
